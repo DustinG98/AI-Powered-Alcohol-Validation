@@ -1,0 +1,10 @@
+{
+  "name": "ai-powered-alcohol-validation",
+  "private": true,
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "bun run --filter frontend dev"
+  }
+}
