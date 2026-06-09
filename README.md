@@ -129,7 +129,7 @@ Label photos in the wild produce noisy OCR — small fonts, curved/decorative ty
 
 ## Performance
 
-**Current Benchmark:** ~2.01s average per image on local Docker host (Ryzen 7 5800X)
+**Current Benchmark:** ~2.56s average per image on local Docker host (Ryzen 7 5800X)
 
 **Target:** < 5 seconds per label
 
