@@ -1,0 +1,33 @@
+services:
+  backend:
+    build: ./backend
+    container_name: alcohol-validation-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    networks:
+      - app-net
+    volumes:
+      - ./backend/app:/app/app
+
+  frontend:
+    build: ./frontend
+    container_name: alcohol-validation-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    networks:
+      - app-net
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8000
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      - ./frontend/index.html:/app/index.html
+      - ./frontend/vite.config.ts:/app/vite.config.ts
+
+networks:
+  app-net:
+    driver: bridge

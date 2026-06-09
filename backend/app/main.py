@@ -7,6 +7,11 @@ app = FastAPI()
 app.include_router(analyze_router, prefix="/api")
 
 
+@app.get("/")
+def ping():
+    return {"status": "ok"}
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
