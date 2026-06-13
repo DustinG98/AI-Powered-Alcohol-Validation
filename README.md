@@ -5,17 +5,31 @@ Validates alcohol beverage labels for compliance with TTB requirements using OCR
 ## Quick Start
 
 ```bash
-# 1. Copy the env template and edit if needed (defaults work for local dev)
+# 1. Copy the env template and edit. In particular, replace
+#    https://your-domain.example in ALLOWED_ORIGINS with your real
+#    hostname (or leave it as-is for the initial local smoke test).
 cp .env.example .env
 
-# 2. Build and start both services
-docker compose up --build
+# 2. Build and start the full stack (backend + nginx front-end)
+docker compose up --build -d
 
 # 3. Open the app
-# Frontend:  http://localhost:5173
-# Backend:   http://localhost:8000
-# API docs:  http://localhost:8000/docs
+# Web app:  http://localhost
+# API docs: http://localhost/docs
 ```
+
+The single-VPS layout:
+
+```
+   internet  ──►  host:80  ──►  nginx (frontend container)
+                                  ├── /        ──► static Vite bundle
+                                  ├── /api/*   ──► FastAPI (backend container, internal only)
+                                  └── /docs    ──► FastAPI (Swagger UI)
+```
+
+The backend listens on port 8000 but is **only** reachable from the nginx container via the internal `app-net` Docker network — it's not published to the host, so it's not exposed to the public internet.
+
+When you're ready to attach a domain, point its A record at the VPS IP, set `ALLOWED_ORIGINS` in `.env` to the real `https://your-domain.example`, and (recommended) add TLS. See the nginx comments in `nginx/nginx.conf` for the upgrade path.
 
 ### Configuration
 
@@ -23,12 +37,12 @@ All runtime configuration is driven by the root `.env` file (loaded by `docker c
 
 | Var | Default | Purpose |
 |-----|---------|---------|
-| `ALLOWED_ORIGINS` | `http://localhost:5173,http://localhost:8000` | Comma-separated CORS allow-list. Set to the deployed front-end origin in production. |
+| `ALLOWED_ORIGINS` | `http://localhost,https://your-domain.example` | Comma-separated CORS allow-list. Replace the placeholder with your real hostname before going live. |
 | `UVICORN_WORKERS` | `1` | Number of uvicorn worker processes. Each owns its own PaddleOCR engine. See **Performance → Batch Throughput** for why threads are unsafe. |
 | `UVICORN_LOG_LEVEL` | `info` | `debug` / `info` / `warning` / `error`. |
 | `MAX_UPLOAD_SIZE_MB` | `15` | Per-image size cap. Larger files are rejected with 413. |
 | `MAX_BATCH_SIZE` | `25` | Per-request image count cap. Larger batches are rejected with 400. |
-| `VITE_API_BASE_URL` | `http://localhost:8000` | Front-end → back-end base URL. |
+| `VITE_API_BASE_URL` | `/api` | Front-end → back-end base URL. Defaults to same-origin (`/api`) so nginx can reverse-proxy it. |
 
 `docker compose` reads the root `.env` automatically. Real `.env` files are gitignored; only `.env.example` is committed.
 

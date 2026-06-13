@@ -38,7 +38,12 @@ type RuleResult = {
   detected_brand?: string | null
   detection_score?: number
   candidates?: { text: string; score: number }[]
-  [key: string]: unknown
+  // Fields produced by the new alcohol_content and class_type_* rules.
+  alcohol_content?: string | null
+  abv?: number | null
+  proof?: number | null
+  detected_phrase?: string | null
+  notes?: string[]
 }
 
 type Validation = {
@@ -654,7 +659,7 @@ function App() {
       <div className="mb-6 flex items-center gap-4">
         <Label
           htmlFor="file-upload"
-          onDragOver={(e) => {
+          onDragOver={(e: React.DragEvent<HTMLLabelElement>) => {
             e.preventDefault()
             setDragOver(true)
           }}

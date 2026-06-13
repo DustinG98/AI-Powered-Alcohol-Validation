@@ -15,6 +15,13 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
+    /* Path aliases (must mirror vite.config.ts).
+     * No baseUrl needed in TS 5.4+; paths are resolved relative to the
+     * tsconfig location. */
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+
     /* Linting */
     "noUnusedLocals": true,
     "noUnusedParameters": true,
@@ -23,3 +30,4 @@
   },
   "include": ["src"]
 }
+
