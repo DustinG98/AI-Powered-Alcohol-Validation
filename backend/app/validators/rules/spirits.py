@@ -1,0 +1,70 @@
+"""Distilled spirits-specific validation rules."""
+
+from __future__ import annotations
+
+from app.validators.rules.class_type import make_validate_class_type
+
+
+_SPIRITS_TYPES = [
+    "kentucky straight bourbon whiskey",
+    "straight bourbon whiskey",
+    "kentucky bourbon whiskey",
+    "bourbon whiskey",
+    "tennessee whiskey",
+    "straight rye whiskey",
+    "straight rye whisky",
+    "rye whiskey",
+    "rye whisky",
+    "straight whiskey",
+    "straight whisky",
+    "blended whiskey",
+    "blended whisky",
+    "blended american whiskey",
+    "blended scotch whisky",
+    "scotch whisky",
+    "single malt scotch whisky",
+    "single malt whisky",
+    "irish whiskey",
+    "canadian whisky",
+    "whisky",
+    "whiskey",
+    "vodka",
+    "rum",
+    "spiced rum",
+    "dark rum",
+    "white rum",
+    "aged rum",
+    "coconut rum",
+    "coconut liqueur",
+    "cream liqueur",
+    "coffee liqueur",
+    "gin",
+    "london dry gin",
+    "distilled gin",
+    "old tom gin",
+    "sloe gin",
+    "brandy",
+    "cognac",
+    "armagnac",
+    "grappa",
+    "pisco",
+    "tequila",
+    "blanco tequila",
+    "reposado tequila",
+    "anejo tequila",
+    "extra anejo tequila",
+    "mezcal",
+    "sotol",
+    "liqueur",
+    "schnapps",
+    "aquavit",
+    "arak",
+    "absinthe",
+    "eaux de vie",
+]
+
+
+validate_spirits_class_type = make_validate_class_type(
+    lexicon=_SPIRITS_TYPES,
+    label="spirits type",
+)

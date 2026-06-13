@@ -220,6 +220,36 @@ def _is_calendar_noise(text: str) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# Government-warning text detection (shared with branding / class_type)
+# ---------------------------------------------------------------------------
+
+_WARNING_LEAK_PATTERNS = [
+    r"government\s*warning",
+    r"surgeon\s*general",
+    r"women\s*should\s*not",
+    r"drink\s*alcoholic",
+    r"alcoholic\s*beverages",
+    r"pregnancy",
+    r"birth\s*defects",
+    r"machinery",
+    r"health\s*problems",
+    r"consumption\s*of",
+    r"impairs\s*your",
+    r"operate\s*machinery",
+    r"\(1\)",
+    r"\(2\)",
+    r"according\s*to\s*the",
+    r"drive\s*a\s*car",
+]
+_WARNING_RE = re.compile("|".join(_WARNING_LEAK_PATTERNS), re.IGNORECASE)
+
+
+def _is_warning_text(text: str) -> bool:
+    flat = _flatten(text)
+    return bool(_WARNING_RE.search(flat))
+
+
 def _extract_warning_from_full_text(full_text: str) -> str:
     """Locate and return the government warning substring from the full document text.
 

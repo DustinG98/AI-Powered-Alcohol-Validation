@@ -2,3 +2,8 @@
 !.vscode/extensions.json
 node_modules/
 .kilo
+
+# Environment files. The .env.example template IS tracked.
+.env
+.env.*
+!.env.example

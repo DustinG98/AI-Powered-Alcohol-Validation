@@ -9,6 +9,7 @@ from typing import Any
 from app.validators.rules.common import (
     _safe_items,
     _is_calendar_noise,
+    _is_warning_text,
     _tokenize,
     _fuzzy_token_match,
     _full_document_text,
@@ -49,36 +50,6 @@ _DETECT_FLOOR = 0.2
 _GROUP_MERGE_GAP_RATIO = 0.6
 _FUZZY_MIN_TOKEN_LEN = 3       # for direct fuzzy/prefix match
 _SUBSTRING_MIN_TOKEN_LEN = 2   # for substring match (e.g. "co" in "examplebrewingco")
-
-# ---------------------------------------------------------------------------
-# Warning text detection (used to filter brand candidates and build observed)
-# ---------------------------------------------------------------------------
-
-_WARNING_LEAK_PATTERNS = [
-    r"government\s*warning",
-    r"surgeon\s*general",
-    r"women\s*should\s*not",
-    r"drink\s*alcoholic",
-    r"alcoholic\s*beverages",
-    r"pregnancy",
-    r"birth\s*defects",
-    r"machinery",
-    r"health\s*problems",
-    r"consumption\s*of",
-    r"impairs\s*your",
-    r"operate\s*machinery",
-    r"\(1\)",
-    r"\(2\)",
-    r"according\s*to\s*the",
-    r"drive\s*a\s*car",
-]
-_WARNING_RE = re.compile("|".join(_WARNING_LEAK_PATTERNS), re.IGNORECASE)
-
-
-def _is_warning_text(text: str) -> bool:
-    flat = _flatten(text)
-    return bool(_WARNING_RE.search(flat))
-
 
 # ---------------------------------------------------------------------------
 # Token building helpers

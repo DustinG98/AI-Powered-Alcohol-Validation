@@ -6,3 +6,6 @@ __pycache__
 .gitignore
 Dockerfile
 README.md
+.env
+.env.*
+!.env.example

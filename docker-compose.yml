@@ -7,6 +7,14 @@ services:
       - "8000:8000"
     networks:
       - app-net
+    environment:
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
+      UVICORN_HOST: ${UVICORN_HOST}
+      UVICORN_PORT: ${UVICORN_PORT}
+      UVICORN_WORKERS: ${UVICORN_WORKERS}
+      UVICORN_LOG_LEVEL: ${UVICORN_LOG_LEVEL}
+      MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB}
+      MAX_BATCH_SIZE: ${MAX_BATCH_SIZE}
     volumes:
       - ./backend/app:/app/app
 
@@ -19,7 +27,7 @@ services:
     networks:
       - app-net
     environment:
-      - VITE_API_BASE_URL=http://localhost:8000
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL}
     depends_on:
       - backend
     volumes:

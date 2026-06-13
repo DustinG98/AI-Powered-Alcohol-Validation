@@ -2,6 +2,36 @@
 
 Validates alcohol beverage labels for compliance with TTB requirements using OCR and rule-based validation.
 
+## Quick Start
+
+```bash
+# 1. Copy the env template and edit if needed (defaults work for local dev)
+cp .env.example .env
+
+# 2. Build and start both services
+docker compose up --build
+
+# 3. Open the app
+# Frontend:  http://localhost:5173
+# Backend:   http://localhost:8000
+# API docs:  http://localhost:8000/docs
+```
+
+### Configuration
+
+All runtime configuration is driven by the root `.env` file (loaded by `docker compose`). See `.env.example` for the full list. Key variables:
+
+| Var | Default | Purpose |
+|-----|---------|---------|
+| `ALLOWED_ORIGINS` | `http://localhost:5173,http://localhost:8000` | Comma-separated CORS allow-list. Set to the deployed front-end origin in production. |
+| `UVICORN_WORKERS` | `1` | Number of uvicorn worker processes. Each owns its own PaddleOCR engine. See **Performance → Batch Throughput** for why threads are unsafe. |
+| `UVICORN_LOG_LEVEL` | `info` | `debug` / `info` / `warning` / `error`. |
+| `MAX_UPLOAD_SIZE_MB` | `15` | Per-image size cap. Larger files are rejected with 413. |
+| `MAX_BATCH_SIZE` | `25` | Per-request image count cap. Larger batches are rejected with 400. |
+| `VITE_API_BASE_URL` | `http://localhost:8000` | Front-end → back-end base URL. |
+
+`docker compose` reads the root `.env` automatically. Real `.env` files are gitignored; only `.env.example` is committed.
+
 ## OCR
 
 **Engine:** PaddleOCR (PP-OCRv5)
@@ -84,6 +114,55 @@ The category with the highest keyword match score is selected. If no keywords ma
 
 **Limitation:** Category detection relies on keyword presence. New brands or international terms may not be recognized and would require expanding the keyword lists.
 
+## Alcohol Content
+
+**Method:** Regex extraction of ABV (`5.2% ABV`, `13.5% ALC/VOL`, `40% ALC`, …) and proof (`80 PROOF`, `PROOF 80`, `80° PROOF`) tokens from the full OCR document text (`backend/app/validators/rules/alcohol_content.py`).
+
+**Category-Specific Rules (mirrors `alcohol_label_verification_spec_v2.md`):**
+
+| Category | Rule | Failure Mode |
+|----------|------|--------------|
+| Beer | ABV only. Proof is invalid. | `REVIEW REQUIRED` if proof present; `MISSING` if no ABV. |
+| Wine | ABV only. Proof is invalid. | `REVIEW REQUIRED` if proof present; `MISSING` if no ABV. |
+| Spirits | Must include ABV and/or proof. When both are present, `proof == ABV × 2` (±0.5). | `REVIEW REQUIRED` on proof mismatch or if only proof is detected. `MISSING` if neither is present. |
+| Unknown | Extracted only; no category rule applied. | `MISSING` if neither is present. |
+
+**Output:**
+- A `rule` result (`alcohol_content`) is appended to `validation.results` with `status`, `expected`, `observed`, `match`, `alcohol_content` (normalized display string, e.g. `"40% ABV / 80 proof"`), `abv` (float or null), `proof` (float or null), and `notes` (human-readable reasons when `REVIEW REQUIRED` / `MISMATCH`).
+- The engine always returns the extracted value even when the status is not `MATCH`, so the front-end can show "Detected: …" alongside the badge.
+
+**Optional `expected_abv`:** The API consumer may supply an expected ABV per image in the `metadata_json` form field (e.g. `{"filename": "label.jpg", "expected_brand": "Stone Throw", "expected_abv": "6.2"}`). The validator compares the extracted ABV against the expected value with a ±0.5 tolerance; mismatch → `MISMATCH` (overall `FAIL`). Proof consistency and category-specific rules still take precedence.
+
+**Limitation:** The extractor is regex-based on OCR text and assumes the ABV is printed with a `%` symbol. Labels that use only the word "Alcohol" or display ABV on a separate colored band may be missed.
+
+## Class / Type Designation
+
+**Method:** Lexicon-based detection over the full OCR document text, with one lexicon per category (`backend/app/validators/rules/beer.py`, `wine.py`, `spirits.py`, all built by `app/validators/rules/class_type.py`).
+
+| Category | Field | Example values |
+|----------|-------|----------------|
+| Beer | Style | IPA, Pale Ale, Lager, Pilsner, Stout, Porter, Saison, Wheat, Hefeweizen, Kölsch, Bock, Gose, Lambic, … |
+| Wine | Varietal | Cabernet Sauvignon, Pinot Noir, Chardonnay, Merlot, Sauvignon Blanc, Riesling, Syrah, Malbec, Zinfandel, Champagne, Prosecco, Rosé, … |
+| Spirits | Type | Bourbon Whiskey, Rye Whiskey, Scotch Whisky, Vodka, Rum, Gin, Tequila (Blanco/Reposado/Añejo), Mezcal, Brandy, Cognac, … |
+
+**How it works:**
+- The shared `class_type.py` module slices the full document text into 1–4 word phrases and matches them against a per-category lexicon.
+- Lexicon entries are matched both verbatim and via substring variants (e.g. an entry of `"kentucky straight bourbon whiskey"` also matches a label that just says `"bourbon whiskey"`), so common shorthand still scores.
+- A fuzzy word-level match is applied as a fallback (single-character edit / prefix), tolerating minor OCR errors.
+
+**Outcomes (no expected value supplied):**
+- `MATCH` — a lexicon entry was detected on the label.
+- `REVIEW REQUIRED` — no recognized entry was found. Per spec, missing style / type is a review item; unknown varietals also fall into this bucket.
+
+**Outcomes (with `expected_class_type` supplied):**
+- `MATCH` — all expected tokens appear in the OCR text.
+- `REVIEW REQUIRED` — partial match (some expected tokens found, some missing).
+- `MISSING` — no expected tokens found.
+
+**Optional `expected_class_type`:** Pass an expected class/type per image in the `metadata_json` form field (e.g. `{"filename": "label.jpg", "expected_class_type": "IPA"}`). The validator checks expected-token coverage against the full document text.
+
+**Limitation:** Detection is lexicon-bound; new styles, proprietary designations, or international terms may not be recognized. The detector does not currently distinguish between "label does not declare a class/type" and "label declares something not in the lexicon" — both surface as `REVIEW REQUIRED`.
+
 ## Branding
 
 **Method:** Two-mode brand handling — verification (expected brand supplied) and detection (no expected brand supplied). The API consumer chooses which path to take by including or omitting `expected_brand` in the per-image metadata sent to `POST /analyze` (`backend/app/api/analyze.py:36`).
@@ -129,13 +208,95 @@ Label photos in the wild produce noisy OCR — small fonts, curved/decorative ty
 
 ## Performance
 
-**Current Benchmark:** ~2.56s average per image on local Docker host (Ryzen 7 5800X)
+**Current Benchmark:** ~3.0s average per image on local Docker host (Ryzen 7 5800X, CPU-only PaddleOCR, single uvicorn worker)
 
 **Target:** < 5 seconds per label
 
 OCR preprocessing (upscaling, CLAHE, sharpening) trades some accuracy for speed, which is acceptable given the performance requirement.
 
 **GPU Acceleration:** Using a GPU-enabled PaddleOCR model would enable both faster processing and improved accuracy. The current CPU-only setup achieves good speed but could deliver better OCR quality with a GPU model without sacrificing the 5-second target.
+
+### Batch Throughput
+
+The endpoint processes images **serially in a single uvicorn worker** (`POST /analyze` in `backend/app/api/analyze.py`). PaddleOCR's PaddlePaddle backend holds shared native state (the inference session and an internal thread pool) that is not safe to call concurrently from multiple Python threads — concurrent invocations from the same process either serialize on internal locks (defeating the purpose) or corrupt shared state. A comment at the call site explains this in the code.
+
+For a single image this comfortably meets the < 5s target. For the 200–300-image import batches that Janet's office handles, scale out the process and let the workers share the load.
+
+**Future: parallel processing.** Two safe paths, in order of preference:
+
+1. **Multiple uvicorn workers, one PaddleOCR engine per worker.** Each worker owns its own OCR instance with no shared state, so they run in parallel trivially. Recommended deployment:
+   ```bash
+   uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+   ```
+   Behind a reverse proxy (`nginx` or the platform's load balancer), each request is routed to one worker and the engine is fully isolated. Memory cost is ~1 model load per worker (~1–2 GB each for the mobile PP-OCRv5 stack).
+
+2. **ProcessPoolExecutor with a fresh engine per worker process.** When running as a single uvicorn worker but you still want intra-request parallelism (e.g. a frontend that already pins to one backend instance), dispatch each image to a worker process. Each subprocess imports its own `PaddleOCR` instance, so shared-state races are eliminated by process isolation. Higher per-image startup cost than option 1, so it's only worth it if you must stay single-process.
+
+Do **not** parallelize via `asyncio.to_thread` or `ThreadPoolExecutor` within a single process — the underlying C++ inference session is not re-entrant and will either deadlock on its own locks or produce wrong results.
+
+## Testing
+
+**This prototype ships without an automated test suite**, a deliberate trade-off driven by the time-constrained nature of the take-home. Every validator, extractor, and rule path was exercised against real label images during development, but the assertions live in manual reproduction rather than in CI-runnable code. The plan below describes what a real test suite would look like; implementing it is the first task for anyone turning this prototype into a maintained codebase.
+
+### What unit tests we would add
+
+The validation engine is pure-Python and trivially testable, so the highest-ROI tests are validator-level and don't need a running OCR engine.
+
+**`backend/tests/test_alcohol_content.py`** — covers `app/validators/rules/alcohol_content.py`
+- Beer with `5.2% ABV` → `MATCH`
+- Beer with `5.2% ABV` and `80 PROOF` → `REVIEW REQUIRED` (proof invalid on beer per spec)
+- Wine with `13.5% ALC/VOL` → `MATCH`
+- Spirits with `40% ABV` and `80 PROOF` → `MATCH` (proof ≈ ABV × 2)
+- Spirits with `40% ABV` and `90 PROOF` → `REVIEW REQUIRED` (proof mismatch > 0.5)
+- Spirits with only `80 PROOF` (no ABV) → `MATCH` per spec line 235-238
+- Spirits with no ABV and no proof → `MISSING`
+- `expected_abv` mismatch by > 0.5 → `MISMATCH`
+
+**`backend/tests/test_government_warning.py`** — covers the casing + clause-anchor logic in `common.py`
+- Exact spec text → `MATCH`
+- Title-case header `Government Warning:` (Jenny's "rejected" case) → `MISMATCH`
+- Missing clause 1 (no pregnancy/birth-defects wording) → `REVIEW REQUIRED`
+- Garbled tail (only the head clause is intact) → `MATCH` (soft threshold)
+- Warning entirely missing → `MISSING`
+
+**`backend/tests/test_net_contents.py`**
+- `750 mL` on a wine label → `MATCH`
+- `1 pint` on a beer label → `MATCH`
+- `750 mL` on a beer label with a `pints` unit → `MISMATCH` (category-specific unit set)
+- No net contents → `MISSING`
+
+**`backend/tests/test_class_type.py`** — covers `class_type.py` plus the three lexicons
+- Beer label with `INDIA PALE ALE` → detected = `india pale ale`, status `MATCH`
+- Beer label with no style designation → `REVIEW REQUIRED` per spec line 135
+- Wine label with `CABERNET SAUVIGNON` → `MATCH`
+- Wine label with only `WINE` (no varietal) → `REVIEW REQUIRED` per spec line 192-194
+- Spirits label with `KENTUCKY STRAIGHT BOURBON WHISKEY` → `MATCH`
+- Spirits label with only `SPIRITS` (no concrete type) → `REVIEW REQUIRED` per spec line 267
+- `verify_expected_class_type("IPA", ...)` against OCR `india pale ale` — currently `MISSING`; document as a known limitation (no abbreviation expansion) and pin the behavior
+
+**`backend/tests/test_branding.py`** — covers `branding.py`
+- Verify mode: `expected="Example Brewing Co."`, OCR tokens include `EXAMPLE`, `BREWINGCO.` → `MATCH` (substring + concat paths exercised)
+- Verify mode: `expected="Stone's Throw"`, OCR `STONE'S THROW` (Dave's case) → `MATCH` (fuzzy + apostrophe handling)
+- Detect mode: top-of-image group with lexicon hits → `MATCH`
+- Detect mode: warning text excluded from brand candidates
+
+**`backend/tests/test_categorize.py`** — covers `categorize.py`
+- `KENTUCKY BOURBON WHISKEY` → `spirits`
+- `CABERNET SAUVIGNON 2019` → `wine`
+- `INDIA PALE ALE` → `beer`
+- No keywords → `unknown`
+
+**`backend/tests/test_validation_engine.py`** — covers `validation_engine.py`
+- `overall_status` aggregation: a `MISMATCH` result anywhere in the list must surface as `FAIL`, not be masked by an earlier `REVIEW REQUIRED` (regression test for the #4 fix)
+- Unknown category: class/type validators are not run
+
+### Recommended tooling
+
+- **`pytest`** as the test runner, with **`pytest-asyncio`** for the FastAPI endpoint tests below.
+- **`pytest-cov`** for coverage reporting. Target: 80%+ on `app/validators/` (the pure logic) before considering the suite adequate.
+- **`httpx`** + **`pytest-asyncio`** for an integration test of `POST /analyze` with mocked OCR (patch `ocr_image_file` to return canned tokens).
+- **`moto`** or **`responses`** if the project ever adds cloud calls (currently none).
+- **Frontend:** **`vitest`** + **`@testing-library/react`** for the React components. The two highest-ROI tests are `statusKind` (pure function) and the result-correlation logic (the `#15` `image_id` matching fix). Pin both with regression tests.
 
 ## Limitations Summary
 
@@ -144,4 +305,26 @@ OCR preprocessing (upscaling, CLAHE, sharpening) trades some accuracy for speed,
 | OCR | Using faster PP-OCRv5_mobile model; better accuracy available with PP-OCRv5_server but slower |
 | Government Warning | May false-pass if OCR drops critical words; fuzzy matching tolerates gaps |
 | Categorization | Keyword-based; requires expansion for new brands/terms |
+| Alcohol Content | Regex-based; assumes ABV is printed with `%`. Proof consistency check assumes US-style proof (ABV × 2). |
+| Class / Type | Lexicon-bound; new styles, proprietary designations, or international terms may not be recognized. Can't distinguish "not declared" from "declared but unknown". |
 | Branding | Heuristic detector (position/size/lexicon blend) can be fooled by stylized script, mid-label brands, or labels where mandatory text visually dominates — use verify mode whenever the expected brand is known |
+
+## API
+
+`POST /analyze` accepts a multipart form with:
+
+- `images`: one or more image files (JPG/JPEG/PNG)
+- `metadata_json`: JSON array, one entry per image:
+  ```json
+  [
+    {
+      "filename": "label.jpg",
+      "expected_brand": "Stone Throw",
+      "expected_abv": "6.2",
+      "expected_class_type": "IPA"
+    }
+  ]
+  ```
+  `expected_brand`, `expected_abv`, and `expected_class_type` are all optional.
+  - `expected_abv`: extracted ABV must match within ±0.5 percentage points.
+  - `expected_class_type`: every expected token must appear in the OCR text for `MATCH`.

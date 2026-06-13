@@ -70,6 +70,8 @@ type ImageEntry = {
   file: File
   previewUrl: string
   expectedBrand: string
+  expectedAbv: string
+  expectedClassType: string
 }
 
 // ---------------------------------------------------------------------------
@@ -118,10 +120,14 @@ function ImageCard({
   entry,
   onRemove,
   onBrandChange,
+  onAbvChange,
+  onClassTypeChange,
 }: {
   entry: ImageEntry
   onRemove: (id: number) => void
   onBrandChange: (id: number, brand: string) => void
+  onAbvChange: (id: number, abv: string) => void
+  onClassTypeChange: (id: number, classType: string) => void
 }) {
   return (
     <Card size="sm" className="overflow-hidden">
@@ -154,6 +160,20 @@ function ImageCard({
           placeholder="Expected brand (optional)"
           value={entry.expectedBrand}
           onChange={(e) => onBrandChange(entry.id, e.target.value)}
+          className="h-8 text-xs"
+        />
+        <Input
+          type="text"
+          placeholder="Expected ABV % (optional)"
+          value={entry.expectedAbv}
+          onChange={(e) => onAbvChange(entry.id, e.target.value)}
+          className="h-8 text-xs"
+        />
+        <Input
+          type="text"
+          placeholder="Expected class/type (optional)"
+          value={entry.expectedClassType}
+          onChange={(e) => onClassTypeChange(entry.id, e.target.value)}
           className="h-8 text-xs"
         />
       </CardContent>
@@ -193,6 +213,14 @@ function ResultCard({
   const overallKind = statusKind(overall)
   const brandResult = validation?.results.find((r) => r.rule === 'brand_verification')
   const brandKind = statusKind(brandResult?.status as string | undefined)
+  const alcoholResult = validation?.results.find(
+    (r) => r.rule === 'alcohol_content',
+  )
+  const alcoholKind = statusKind(alcoholResult?.status as string | undefined)
+  const classTypeResult = validation?.results.find((r) =>
+    r.rule.startsWith('class_type_'),
+  )
+  const classTypeKind = statusKind(classTypeResult?.status as string | undefined)
   const ruleCount = validation?.results.length ?? 0
 
   return (
@@ -236,7 +264,7 @@ function ResultCard({
             </div>
           )}
 
-          <div className="w-full text-center">
+          <div className="w-full text-center space-y-0.5">
             <p
               className="truncate text-xs font-medium"
               title={result.filename}
@@ -251,6 +279,15 @@ function ResultCard({
               </p>
             ) : (
               <p className="text-muted-foreground text-xs">—</p>
+            )}
+            {(alcoholResult?.alcohol_content || classTypeResult?.detected_phrase) && (
+              <p className="text-muted-foreground text-xs">
+                {alcoholResult?.alcohol_content}
+                {alcoholResult?.alcohol_content && classTypeResult?.detected_phrase
+                  ? ' · '
+                  : ''}
+                {classTypeResult?.detected_phrase}
+              </p>
             )}
           </div>
         </div>
@@ -349,6 +386,75 @@ function ResultCard({
             </>
           )}
 
+          {alcoholResult && (
+            <>
+              <Separator />
+              <div className="bg-accent/40 flex flex-wrap items-center gap-2 px-3 py-2 text-xs">
+                <span className="font-semibold">Alcohol Content</span>
+                <Badge className={cn(statusBadgeClass(alcoholKind))}>
+                  {alcoholResult.status}
+                </Badge>
+                {alcoholResult.expected && (
+                  <span className="text-muted-foreground">
+                    Expected: {alcoholResult.expected}
+                  </span>
+                )}
+                {alcoholResult.observed && (
+                  <span className="text-muted-foreground">
+                    Detected: {alcoholResult.observed}
+                  </span>
+                )}
+                {Array.isArray(alcoholResult.notes) &&
+                  (alcoholResult.notes as string[]).length > 0 && (
+                    <span className="text-amber-600">
+                      {(alcoholResult.notes as string[]).join(' ')}
+                    </span>
+                  )}
+              </div>
+            </>
+          )}
+
+          {classTypeResult && (
+            <>
+              <Separator />
+              <div className="bg-accent/40 flex flex-wrap items-center gap-2 px-3 py-2 text-xs">
+                <span className="font-semibold">Class / Type</span>
+                <Badge className={cn(statusBadgeClass(classTypeKind))}>
+                  {classTypeResult.status}
+                </Badge>
+                {classTypeResult.expected && (
+                  <span className="text-muted-foreground">
+                    Expected: {classTypeResult.expected}
+                  </span>
+                )}
+                {classTypeResult.detected_phrase && (
+                  <span className="text-muted-foreground">
+                    Detected: {classTypeResult.detected_phrase}
+                  </span>
+                )}
+                {classTypeResult.observed &&
+                  !classTypeResult.detected_phrase && (
+                    <span className="text-muted-foreground">
+                      Found: {classTypeResult.observed}
+                    </span>
+                  )}
+                {Array.isArray(classTypeResult.missing_tokens) &&
+                  (classTypeResult.missing_tokens as string[]).length > 0 && (
+                    <span className="text-destructive">
+                      Missing:{' '}
+                      {(classTypeResult.missing_tokens as string[]).join(', ')}
+                    </span>
+                  )}
+                {Array.isArray(classTypeResult.notes) &&
+                  (classTypeResult.notes as string[]).length > 0 && (
+                    <span className="text-amber-600">
+                      {(classTypeResult.notes as string[]).join(' ')}
+                    </span>
+                  )}
+              </div>
+            </>
+          )}
+
           {validation && (
             <>
               <Separator />
@@ -442,6 +548,8 @@ function App() {
       file,
       previewUrl: URL.createObjectURL(file),
       expectedBrand: '',
+      expectedAbv: '',
+      expectedClassType: '',
     }))
     setEntries((prev) => {
       prev.forEach((e) => URL.revokeObjectURL(e.previewUrl))
@@ -486,6 +594,18 @@ function App() {
     )
   }, [])
 
+  const handleAbvChange = useCallback((id: number, abv: string) => {
+    setEntries((prev) =>
+      prev.map((e) => (e.id === id ? { ...e, expectedAbv: abv } : e)),
+    )
+  }, [])
+
+  const handleClassTypeChange = useCallback((id: number, classType: string) => {
+    setEntries((prev) =>
+      prev.map((e) => (e.id === id ? { ...e, expectedClassType: classType } : e)),
+    )
+  }, [])
+
   const handleReset = useCallback(() => {
     setEntries((prev) => {
       prev.forEach((e) => URL.revokeObjectURL(e.previewUrl))
@@ -503,6 +623,8 @@ function App() {
       const metadata = entries.map((e) => ({
         filename: e.file.name,
         expected_brand: e.expectedBrand,
+        expected_abv: e.expectedAbv,
+        expected_class_type: e.expectedClassType,
       }))
       const data = (await analyzeImages(
         entries.map((e) => e.file),
@@ -583,6 +705,8 @@ function App() {
                 entry={entry}
                 onRemove={handleRemove}
                 onBrandChange={handleBrandChange}
+                onAbvChange={handleAbvChange}
+                onClassTypeChange={handleClassTypeChange}
               />
             ))}
           </div>
@@ -612,11 +736,20 @@ function App() {
             </Button>
           </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-            {entries.map((entry) => {
+            {entries.map((entry, idx) => {
+              // Server assigns image_id "img_1", "img_2", ... in upload
+              // order, so match by that rather than filename to avoid
+              // collisions on duplicate filenames.
               const result = results.results.find(
-                (r) => r.filename === entry.file.name,
+                (r) => r.image_id === `img_${idx + 1}`,
               )
-              if (!result) return null
+              if (!result) {
+                return (
+                  <Card key={entry.id} className="p-3 text-xs text-muted-foreground">
+                    No result for {entry.file.name}
+                  </Card>
+                )
+              }
               return <ResultCard key={entry.id} result={result} entry={entry} />
             })}
           </div>
