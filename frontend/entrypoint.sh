@@ -15,12 +15,15 @@
 set -eu
 
 CONF_DIR=/etc/nginx/conf.d
-HTTPS_CONF=/etc/nginx/templates/default.conf.template
-HTTP_CONF=/etc/nginx/templates/default.local.conf.template
+HTTPS_CONF=/etc/nginx/conf-src/default.conf.template
+HTTP_CONF=/etc/nginx/conf-src/default.local.conf.template
 LIVE_DIR="/etc/letsencrypt/live/${CERTBOT_DOMAIN:-}"
 
 # Make sure we're starting from a clean slate so the right config wins.
-rm -f "${CONF_DIR}/default.conf"
+# (The base image's envsubst step may have written other .conf files
+# into this directory from previous runs; clear them all so nginx
+# doesn't see duplicate upstream blocks or stale 443 listeners.)
+rm -f "${CONF_DIR}/"*.conf
 
 if [ -n "${CERTBOT_DOMAIN:-}" ] && [ -f "${LIVE_DIR}/fullchain.pem" ]; then
     echo "[frontend] Cert found at ${LIVE_DIR}/fullchain.pem — enabling HTTPS."
