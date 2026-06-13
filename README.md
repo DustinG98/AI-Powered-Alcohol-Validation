@@ -4,83 +4,32 @@ Validates alcohol beverage labels for compliance with TTB requirements using OCR
 
 ## Quick Start
 
-### Local development (HTTP, no cert, no domain)
-
 ```bash
-# Use the pre-baked .env.local that has TLS off and ALLOWED_ORIGINS set
-# to http://localhost. (Or copy .env.example -> .env and blank out the
-# CERTBOT_* vars + set ALLOWED_ORIGINS=http://localhost.)
-cp .env.local .env
+# 1. Copy the env template
+cp .env.local.example .env
 
-# Bring up backend + nginx only (certbot is not started).
-docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
-
-# Open http://localhost
-```
-
-The local override (`docker-compose.local.yml`) mounts a sibling `nginx/nginx.local.conf` that listens on port 80 only, swaps the HTTPS server block for plain HTTP, and starts the frontend service with a `profiles: ["never"]` no-op for certbot. The backend container, the Vite build, and the `/api/*` reverse proxy are identical to production — only TLS is missing.
-
-### Production (HTTPS via Let's Encrypt)
-
-```bash
-# 1. Copy the env template and edit
-cp .env.example .env
-# In .env, set:
-#   CERTBOT_DOMAIN   = your real hostname (A record must point at this VPS)
-#   CERTBOT_EMAIL    = an email for Let's Encrypt notices
-#   ALLOWED_ORIGINS  = https://${CERTBOT_DOMAIN}
-# Leave CERTBOT_STAGING=false for production; set true to test the
-# http-01 flow without hitting Let's Encrypt rate limits.
-
-# 2. Build and start the full stack (backend + nginx + certbot)
+# 2. Build and start the full stack (backend + frontend nginx)
 docker compose up --build -d
 
-# 3. Wait ~30s for certbot to obtain the cert on its first run, then:
-docker compose restart frontend
-
-# 4. Open the app
-# Web app:  https://your-domain.example
-# API docs: https://your-domain.example/docs
+# 3. Open http://localhost
 ```
 
-The single-VPS layout:
-
-```
-   internet  ──►  host:80   ──►  nginx (frontend container)  ──►  ACME challenge (.well-known/)
-   internet  ──►  host:443  ──►  nginx (frontend container)
-                                    ├── /             ──► static Vite bundle
-                                    ├── /api/*        ──► FastAPI (backend container, internal only)
-                                    └── /docs, /redoc ──► FastAPI (Swagger UI)
-
-   certbot container  ──►  /var/www/certbot  (shared with nginx)  +  /etc/letsencrypt
-```
-
-The backend listens on port 8000 but is **only** reachable from the nginx container via the internal `app-net` Docker network — it's not published to the host, so it's not exposed to the public internet. The certbot container shares two volumes with nginx: `certbot-www` (the webroot for the http-01 challenge) and `certbot-certs` (the issued certificates that nginx reads).
-
-### TLS / certificate renewal
-
-- **First run:** certbot issues a certificate, then exits to `sleep infinity` so the container stays up. After ~30 s, `docker compose restart frontend` picks up the new cert and the HTTPS listener comes alive.
-- **Renewal:** every time the certbot container starts (e.g. after a `docker compose up -d` or a manual `docker compose restart certbot`), it runs `certbot renew` and reloads. If the cert is more than 60 days from expiry, the renew is a no-op.
-- **Staging/testing:** set `CERTBOT_STAGING=true` in `.env` to get a fake Let's Encrypt cert. Useful when verifying the flow without burning the production rate limit (5 certs / 7 days per domain).
-- **Custom certs:** if you have your own cert + key (e.g. wildcard from a corporate CA), skip the certbot service and mount your files into the frontend container at `/etc/letsencrypt/live/${CERTBOT_DOMAIN}/fullchain.pem` and `privkey.pem`.
+The `certbot` service starts in this setup but exits cleanly (`CERTBOT_DOMAIN` is blank), so it doesn't restart-loop. To stop everything: `docker compose down`.
 
 ### Configuration
 
-All runtime configuration is driven by the root `.env` file (loaded by `docker compose`). See `.env.example` for the full list. Key variables:
+All runtime configuration is driven by the root `.env` file (loaded by `docker compose`). See `.env.example` for the full list. Key variables for local dev:
 
 | Var | Default | Purpose |
 |-----|---------|---------|
-| `ALLOWED_ORIGINS` | `http://localhost,https://your-domain.example` | Comma-separated CORS allow-list. Replace the placeholder with your real hostname before going live. |
-| `CERTBOT_DOMAIN` | `your-domain.example` | Hostname for the Let's Encrypt certificate. Must resolve to this VPS before the stack starts. |
-| `CERTBOT_EMAIL` | `admin@your-domain.example` | Email for Let's Encrypt expiry notices. |
-| `CERTBOT_STAGING` | `false` | `true` to issue a staging cert (testing only). |
+| `ALLOWED_ORIGINS` | `http://localhost` | Comma-separated CORS allow-list. |
 | `UVICORN_WORKERS` | `1` | Number of uvicorn worker processes. Each owns its own PaddleOCR engine. See **Performance → Batch Throughput** for why threads are unsafe. |
 | `UVICORN_LOG_LEVEL` | `info` | `debug` / `info` / `warning` / `error`. |
 | `MAX_UPLOAD_SIZE_MB` | `15` | Per-image size cap. Larger files are rejected with 413. |
 | `MAX_BATCH_SIZE` | `25` | Per-request image count cap. Larger batches are rejected with 400. |
-| `VITE_API_BASE_URL` | `/api` | Front-end → back-end base URL. Defaults to same-origin (`/api`) so nginx can reverse-proxy it. |
+| `VITE_API_BASE_URL` | `/api` | Front-end → back-end base URL. Same-origin (`/api`) so nginx can reverse-proxy it. |
 
-`docker compose` reads the root `.env` automatically. Real `.env` files are gitignored; only `.env.example` is committed.
+`docker compose` reads the root `.env` automatically. Real `.env` files are gitignored; only `.env.example` and `.env.local.example` are committed.
 
 ## OCR
 

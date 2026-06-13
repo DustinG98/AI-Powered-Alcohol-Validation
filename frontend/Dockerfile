@@ -29,10 +29,27 @@ FROM nginx:1.27-alpine
 # Vite builds into /app/dist in the build stage (the default `outDir`).
 COPY --from=build /app/dist /usr/share/nginx/html
 
-# Custom entrypoint. On every start it picks the right nginx config
-# based on whether the Let's Encrypt cert has been issued yet, so the
-# container can start HTTP-only on first boot (for the ACME challenge)
-# and switch to HTTPS once the cert exists.
+# Cert domain is baked in at build time. Default to a sentinel that
+# produces an obviously-invalid cert path, so the image still builds
+# (and still runs) without a real cert. The compose-driven local-dev
+# flow also writes an empty https.conf via entrypoint.sh, which
+# shields the rendered path from nginx entirely.
+ARG CERTBOT_DOMAIN=_unset
+# https.conf contains a literal $CERTBOT_DOMAIN token; substitute it
+# at build time and install the rendered file. The entrypoint
+# overwrites this with an empty file when no cert is on disk yet.
+COPY nginx/https.conf /etc/nginx/conf-src/https.conf
+RUN sed -i "s|\$CERTBOT_DOMAIN|${CERTBOT_DOMAIN}|g" /etc/nginx/conf-src/https.conf
+
+# Install the base nginx config into the image's templates dir so the
+# base image's envsubst step renders it. The include of
+# /etc/nginx/conf.d/https.conf is always present in nginx.conf, so
+# envsubst has nothing to substitute at runtime.
+COPY nginx/nginx.conf /etc/nginx/templates/default.conf.template
+
+# Entry point: on every start, copy the prebuilt https.conf (or write
+# an empty placeholder) into /etc/nginx/conf.d/ based on whether the
+# Let's Encrypt cert is on disk. See entrypoint.sh.
 COPY entrypoint.sh /usr/local/bin/frontend-entrypoint.sh
 RUN chmod +x /usr/local/bin/frontend-entrypoint.sh
 
