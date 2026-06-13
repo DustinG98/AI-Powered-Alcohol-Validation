@@ -69,8 +69,9 @@ services:
       CERTBOT_DOMAIN: ${CERTBOT_DOMAIN}
       CERTBOT_EMAIL: ${CERTBOT_EMAIL}
       CERTBOT_STAGING: ${CERTBOT_STAGING:-false}
-    entrypoint: /bin/sh
-    command: -c "/usr/local/bin/certbot-entrypoint.sh"
+    # Invoke via `sh` so the script doesn't need the executable bit
+    # (which isn't reliably preserved on Windows checkouts of bind mounts).
+    entrypoint: ["/bin/sh", "/usr/local/bin/certbot-entrypoint.sh"]
     volumes:
       - ./nginx/certbot-entrypoint.sh:/usr/local/bin/certbot-entrypoint.sh:ro
       - certbot-www:/var/www/certbot
