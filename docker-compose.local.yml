@@ -8,21 +8,17 @@
 #
 # In your .env, set ALLOWED_ORIGINS=http://localhost and leave the
 # CERTBOT_* vars blank. Then browse to http://localhost.
+#
+# The frontend container's custom entrypoint picks the HTTP-only
+# config automatically when CERTBOT_DOMAIN is empty, so no per-service
+# config swap is needed here.
 
 services:
   frontend:
     ports:
       - "80:80"
-    # No 443 exposure. The 443 listener in nginx.conf references cert
-    # files that don't exist locally; we replace the config with a
-    # http-only version below.
-    volumes:
-      - ./nginx/nginx.local.conf:/etc/nginx/conf.d/default.conf:ro
-      # Drop the certbot-www and certbot-certs mounts — not needed locally.
-    environment:
-      # Empty so the HTTPS server block in nginx.local.conf is not
-      # activated (it uses an `if` guard on the cert files existing).
-      CERTBOT_DOMAIN: ""
+    # No 443 exposure locally. The entrypoint uses the HTTP-only
+    # template because CERTBOT_DOMAIN is empty and no cert is present.
 
   certbot:
     # Don't start certbot locally.

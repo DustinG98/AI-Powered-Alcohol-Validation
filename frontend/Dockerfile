@@ -29,10 +29,12 @@ FROM nginx:1.27-alpine
 # Vite builds into /app/dist in the build stage (the default `outDir`).
 COPY --from=build /app/dist /usr/share/nginx/html
 
-# The default nginx site is mounted read-only at runtime via compose, so
-# we don't need to delete it here — but it doesn't hurt to be explicit
-# in case anyone runs the image standalone.
-RUN rm -f /etc/nginx/conf.d/default.conf
+# Custom entrypoint. On every start it picks the right nginx config
+# based on whether the Let's Encrypt cert has been issued yet, so the
+# container can start HTTP-only on first boot (for the ACME challenge)
+# and switch to HTTPS once the cert exists.
+COPY entrypoint.sh /usr/local/bin/frontend-entrypoint.sh
+RUN chmod +x /usr/local/bin/frontend-entrypoint.sh
 
 # Healthcheck against the container's own /healthz endpoint.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
@@ -40,4 +42,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 EXPOSE 80
 
+ENTRYPOINT ["/usr/local/bin/frontend-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]

@@ -47,12 +47,12 @@ services:
     environment:
       CERTBOT_DOMAIN: ${CERTBOT_DOMAIN}
     volumes:
-      # Mount the nginx config as a `.template` file so the base
-      # image's `envsubst` step (see
-      # https://github.com/nginx/docker-nginx/blob/master/entrypoint/20-envsubst-on-templates.sh)
-      # substitutes $CERTBOT_DOMAIN with the value from the container's
-      # env, and writes the rendered result to /etc/nginx/conf.d/.
+      # Both configs are mounted as templates into /etc/nginx/templates/.
+      # The custom entrypoint picks one or the other at startup based on
+      # whether the cert has been issued yet, so the container can start
+      # HTTP-only on first boot and switch to HTTPS once the cert exists.
       - ./nginx/nginx.conf:/etc/nginx/templates/default.conf.template:ro
+      - ./nginx/nginx.local.conf:/etc/nginx/templates/default.local.conf.template:ro
       - certbot-www:/var/www/certbot:ro
       - certbot-certs:/etc/letsencrypt:ro
     depends_on:
