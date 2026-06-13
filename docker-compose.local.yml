@@ -1,0 +1,29 @@
+# Local development override. Starts only the backend and the nginx
+# front-end, with the HTTPS server block disabled. The certbot service
+# is not started and port 443 is not published.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
+# or just `make dev` if you add a Makefile target.
+#
+# In your .env, set ALLOWED_ORIGINS=http://localhost and leave the
+# CERTBOT_* vars blank. Then browse to http://localhost.
+
+services:
+  frontend:
+    ports:
+      - "80:80"
+    # No 443 exposure. The 443 listener in nginx.conf references cert
+    # files that don't exist locally; we replace the config with a
+    # http-only version below.
+    volumes:
+      - ./nginx/nginx.local.conf:/etc/nginx/conf.d/default.conf:ro
+      # Drop the certbot-www and certbot-certs mounts — not needed locally.
+    environment:
+      # Empty so the HTTPS server block in nginx.local.conf is not
+      # activated (it uses an `if` guard on the cert files existing).
+      CERTBOT_DOMAIN: ""
+
+  certbot:
+    # Don't start certbot locally.
+    profiles: ["never"]
