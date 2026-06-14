@@ -221,6 +221,32 @@ The OCR engine is loaded once per uvicorn worker process (cached via `lru_cache`
 
 **GPU Acceleration:** Using a GPU-enabled PaddleOCR model would enable both faster processing and improved accuracy. The current CPU-only setup achieves good speed but could deliver better OCR quality with a GPU model without sacrificing the 5-second target.
 
+### Local vs. VPS Latency
+
+The same image processed by the same code on the same model takes meaningfully longer on a shared-vCPU VPS than on a modern desktop CPU. Measured wall time for a typical label image:
+
+| Environment | CPU | Recognition model | Per-image wall time |
+|------------|-----|--------------------|---------------------|
+| Local desktop (Win 11, Docker) | Ryzen 7 5800X (8c/16t @ 3.8–4.7 GHz) | mobile_rec | ~3.0 s |
+| Contabo VPS 4 vCPU | shared, ~2.0–2.4 GHz under contention | mobile_rec, single image | ~16–18 s |
+| Contabo VPS 4 vCPU | shared, ~2.0–2.4 GHz under contention | mobile_rec, batch of 2-3 | ~12–13 s |
+
+The code path is identical; the gap is hardware. A batch of 2-3 images comes in slightly faster per-image than a single request because PaddleOCR's warm-up and OpenCV's internal threading are amortized across the batch, but the per-image cost is dominated by the OCR inference itself.
+
+**Why the VPS is so much slower:**
+
+- **Clock speed.** The desktop CPU runs ~2× faster per core than a typical shared-vCPU VPS core. PaddleOCR inference is single-threaded, so this matters directly.
+- **CPU contention.** Shared-vCPU tenants get throttled when other VMs on the same physical host are busy (the "noisy neighbor" problem). Bursty tenants cause the per-request wall time to spike.
+- **Memory bandwidth.** VPS RAM is often DDR4-2400 vs. desktop DDR4/DDR5-3600+; the model-load step is bandwidth-bound.
+- **No GPU.** PaddleOCR's `paddlepaddle` package is the CPU-only build. A GPU-enabled image (CUDA build + driver passthrough) would close most of the gap.
+- **Single-core bottleneck.** `docker compose` runs one uvicorn worker (`UVICORN_WORKERS=1`), so even though the VPS has 4 vCPUs, only one is in use per request. The other 3 sit idle. Scaling out workers helps throughput, not single-image wall time.
+
+**Practical implications for this deployment:**
+
+- A take-home showcase with a handful of labels per session: 12-18 s per image is uncomfortable but acceptable. The user clicks "Analyze" and waits ~15 s, which is the upper bound of what's tolerable for a manual review tool. The 5 s target from Sarah's interview notes is not met on this hardware.
+- Janet's 200–300-image import batches: at ~12 s per image the current setup would take ~40-60 minutes per batch, which is unusable. Either upgrade to a VPS with dedicated CPU cores or GPU, or scale out to multiple workers behind a reverse proxy for parallel throughput.
+- **Short-term mitigation:** if a faster turnaround is required without changing infrastructure, the realistic options are (a) reduce input image size before OCR (cap at 1600 px longest edge), or (b) accept the 12-18 s per image as the cost of running CPU OCR on shared vCPUs.
+
 ### Batch Throughput
 
 The endpoint processes images **serially in a single uvicorn worker** (`POST /analyze` in `backend/app/api/analyze.py`). PaddleOCR's PaddlePaddle backend holds shared native state (the inference session and an internal thread pool) that is not safe to call concurrently from multiple Python threads — concurrent invocations from the same process either serialize on internal locks (defeating the purpose) or corrupt shared state. A comment at the call site explains this in the code.
