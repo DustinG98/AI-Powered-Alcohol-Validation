@@ -207,11 +207,17 @@ Label photos in the wild produce noisy OCR — small fonts, curved/decorative ty
 
 ## Performance
 
-**Current Benchmark:** ~3.0s average per image on local Docker host (Ryzen 7 5800X, CPU-only PaddleOCR, single uvicorn worker)
+**Current Benchmark:** ~3.0s average per image on local Docker host (Ryzen 7 5800X, CPU-only PaddleOCR, single uvicorn worker, mobile recognition model)
 
 **Target:** < 5 seconds per label
 
 OCR preprocessing (upscaling, CLAHE, sharpening) trades some accuracy for speed, which is acceptable given the performance requirement.
+
+**Recognition model:** PaddleOCR loads the `PP-OCRv5_mobile_rec` model by default, which gives the best CPU latency. The heavier `PP-OCRv5_server_rec` model is also available — it's noticeably more accurate on dense or stylized labels but roughly 2-3× slower on CPU. Switch via env var:
+```bash
+OCR_RECOGNITION_MODEL=PP-OCRv5_server_rec docker compose up --build -d backend
+```
+The OCR engine is loaded once per uvicorn worker process (cached via `lru_cache`), so the model is **not** reloaded on every request — only the inference runs each time. Restart the backend after changing the env var to pick up the new model.
 
 **GPU Acceleration:** Using a GPU-enabled PaddleOCR model would enable both faster processing and improved accuracy. The current CPU-only setup achieves good speed but could deliver better OCR quality with a GPU model without sacrificing the 5-second target.
 

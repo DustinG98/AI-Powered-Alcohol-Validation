@@ -9,6 +9,8 @@ from typing import BinaryIO
 import numpy as np
 from PIL import Image
 
+import os
+
 try:
     from paddleocr import PaddleOCR  # type: ignore
 except Exception:  # pragma: no cover - allow import without paddleocr installed
@@ -18,6 +20,18 @@ try:
     import cv2  # type: ignore
 except Exception:  # pragma: no cover
     cv2 = None
+
+
+# OCR model selection. Defaults to the mobile recognition model for
+# faster CPU inference. Set OCR_RECOGNITION_MODEL=PP-OCRv5_server_rec
+# in the environment to use the heavier server model (higher accuracy,
+# ~2-3x slower on CPU).
+_RECOGNITION_MODEL = os.environ.get(
+    "OCR_RECOGNITION_MODEL", "PP-OCRv5_mobile_rec"
+)
+_DETECTION_MODEL = os.environ.get(
+    "OCR_DETECTION_MODEL", "PP-OCRv5_mobile_det"
+)
 
 
 class OCRUnavailable(RuntimeError):
@@ -34,9 +48,17 @@ def get_ocr_engine() -> "PaddleOCR":
         use_doc_orientation_classify=False,
         use_doc_unwarping=False,
         use_textline_orientation=True,
-        text_detection_model_name="PP-OCRv5_mobile_det",
-        text_recognition_model_name="PP-OCRv5_server_rec",
+        text_detection_model_name=_DETECTION_MODEL,
+        text_recognition_model_name=_RECOGNITION_MODEL,
     )
+
+
+def reset_ocr_engine() -> None:
+    """Drop the cached PaddleOCR instance so the next call to
+    `get_ocr_engine()` rebuilds with current env vars. Useful in
+    tests or when toggling between mobile/server models at runtime.
+    """
+    get_ocr_engine.cache_clear()
 
 
 def _normalize_text(text: str) -> str:
