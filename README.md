@@ -207,7 +207,7 @@ Label photos in the wild produce noisy OCR — small fonts, curved/decorative ty
 
 ## Performance
 
-**Current Benchmark:** ~3.0s average per image on local Docker host (Ryzen 7 5800X, CPU-only PaddleOCR, single uvicorn worker, mobile recognition model)
+**Current Benchmark:** ~3.0s average per image on local Docker host (Ryzen 7 5800X, CPU-only PaddleOCR, single uvicorn worker, server recognition model)
 
 **Target:** < 5 seconds per label
 
@@ -227,11 +227,11 @@ The same image processed by the same code on the same model takes meaningfully l
 
 | Environment | CPU | Recognition model | Per-image wall time |
 |------------|-----|--------------------|---------------------|
-| Local desktop (Win 11, Docker) | Ryzen 7 5800X (8c/16t @ 3.8–4.7 GHz) | mobile_rec | ~3.0 s |
-| Contabo VPS 4 vCPU | shared, ~2.0–2.4 GHz under contention | mobile_rec, single image | ~16–18 s |
-| Contabo VPS 4 vCPU | shared, ~2.0–2.4 GHz under contention | mobile_rec, batch of 2-3 | ~12–13 s |
+| Local desktop (Win 11, Docker) | Ryzen 7 5800X (8c/16t @ 3.8–4.7 GHz) | server_rec | ~3.0 s |
+| Contabo VPS 4 vCPU | shared, ~2.0–2.4 GHz under contention | server_rec, single image | ~16–18 s |
+| Contabo VPS 4 vCPU | shared, ~2.0–2.4 GHz under contention | mobile_rec, batch of 2-3 | ~12–13 s per image |
 
-The code path is identical; the gap is hardware. A batch of 2-3 images comes in slightly faster per-image than a single request because PaddleOCR's warm-up and OpenCV's internal threading are amortized across the batch, but the per-image cost is dominated by the OCR inference itself.
+The code path is identical; the gap is hardware.
 
 **Why the VPS is so much slower:**
 
@@ -269,65 +269,6 @@ Do **not** parallelize via `asyncio.to_thread` or `ThreadPoolExecutor` within a 
 
 **This prototype ships without an automated test suite**, a deliberate trade-off driven by the time-constrained nature of the take-home. Every validator, extractor, and rule path was exercised against real label images during development, but the assertions live in manual reproduction rather than in CI-runnable code. The plan below describes what a real test suite would look like; implementing it is the first task for anyone turning this prototype into a maintained codebase.
 
-### What unit tests we would add
-
-The validation engine is pure-Python and trivially testable, so the highest-ROI tests are validator-level and don't need a running OCR engine.
-
-**`backend/tests/test_alcohol_content.py`** — covers `app/validators/rules/alcohol_content.py`
-- Beer with `5.2% ABV` → `MATCH`
-- Beer with `5.2% ABV` and `80 PROOF` → `REVIEW REQUIRED` (proof invalid on beer per spec)
-- Wine with `13.5% ALC/VOL` → `MATCH`
-- Spirits with `40% ABV` and `80 PROOF` → `MATCH` (proof ≈ ABV × 2)
-- Spirits with `40% ABV` and `90 PROOF` → `REVIEW REQUIRED` (proof mismatch > 0.5)
-- Spirits with only `80 PROOF` (no ABV) → `MATCH` per spec line 235-238
-- Spirits with no ABV and no proof → `MISSING`
-- `expected_abv` mismatch by > 0.5 → `MISMATCH`
-
-**`backend/tests/test_government_warning.py`** — covers the casing + clause-anchor logic in `common.py`
-- Exact spec text → `MATCH`
-- Title-case header `Government Warning:` (Jenny's "rejected" case) → `MISMATCH`
-- Missing clause 1 (no pregnancy/birth-defects wording) → `REVIEW REQUIRED`
-- Garbled tail (only the head clause is intact) → `MATCH` (soft threshold)
-- Warning entirely missing → `MISSING`
-
-**`backend/tests/test_net_contents.py`**
-- `750 mL` on a wine label → `MATCH`
-- `1 pint` on a beer label → `MATCH`
-- `750 mL` on a beer label with a `pints` unit → `MISMATCH` (category-specific unit set)
-- No net contents → `MISSING`
-
-**`backend/tests/test_class_type.py`** — covers `class_type.py` plus the three lexicons
-- Beer label with `INDIA PALE ALE` → detected = `india pale ale`, status `MATCH`
-- Beer label with no style designation → `REVIEW REQUIRED` per spec line 135
-- Wine label with `CABERNET SAUVIGNON` → `MATCH`
-- Wine label with only `WINE` (no varietal) → `REVIEW REQUIRED` per spec line 192-194
-- Spirits label with `KENTUCKY STRAIGHT BOURBON WHISKEY` → `MATCH`
-- Spirits label with only `SPIRITS` (no concrete type) → `REVIEW REQUIRED` per spec line 267
-- `verify_expected_class_type("IPA", ...)` against OCR `india pale ale` — currently `MISSING`; document as a known limitation (no abbreviation expansion) and pin the behavior
-
-**`backend/tests/test_branding.py`** — covers `branding.py`
-- Verify mode: `expected="Example Brewing Co."`, OCR tokens include `EXAMPLE`, `BREWINGCO.` → `MATCH` (substring + concat paths exercised)
-- Verify mode: `expected="Stone's Throw"`, OCR `STONE'S THROW` (Dave's case) → `MATCH` (fuzzy + apostrophe handling)
-- Detect mode: top-of-image group with lexicon hits → `MATCH`
-- Detect mode: warning text excluded from brand candidates
-
-**`backend/tests/test_categorize.py`** — covers `categorize.py`
-- `KENTUCKY BOURBON WHISKEY` → `spirits`
-- `CABERNET SAUVIGNON 2019` → `wine`
-- `INDIA PALE ALE` → `beer`
-- No keywords → `unknown`
-
-**`backend/tests/test_validation_engine.py`** — covers `validation_engine.py`
-- `overall_status` aggregation: a `MISMATCH` result anywhere in the list must surface as `FAIL`, not be masked by an earlier `REVIEW REQUIRED` (regression test for the #4 fix)
-- Unknown category: class/type validators are not run
-
-### Recommended tooling
-
-- **`pytest`** as the test runner, with **`pytest-asyncio`** for the FastAPI endpoint tests below.
-- **`pytest-cov`** for coverage reporting. Target: 80%+ on `app/validators/` (the pure logic) before considering the suite adequate.
-- **`httpx`** + **`pytest-asyncio`** for an integration test of `POST /analyze` with mocked OCR (patch `ocr_image_file` to return canned tokens).
-- **`moto`** or **`responses`** if the project ever adds cloud calls (currently none).
-- **Frontend:** **`vitest`** + **`@testing-library/react`** for the React components. The two highest-ROI tests are `statusKind` (pure function) and the result-correlation logic (the `#15` `image_id` matching fix). Pin both with regression tests.
 
 ## Limitations Summary
 
